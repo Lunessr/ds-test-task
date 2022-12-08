@@ -12,7 +12,7 @@ import { ActivityStatusCode } from './activity-status-code.entity';
 
 @Entity({ name: 'user' })
 export class User extends BaseEntity {
-  @PrimaryGeneratedColumn({ type: 'int' })
+  @PrimaryGeneratedColumn({ type: 'bigint' })
   id: number;
 
   @Column({
@@ -29,7 +29,7 @@ export class User extends BaseEntity {
   @Column({ name: 'email', type: 'varchar', length: 200, unique: true })
   email: string;
 
-  @Column({ name: 'uaid', type: 'varchar', unique: true })
+  @Column({ name: 'uaid', type: 'varchar', length: 24, unique: true })
   uaid: string;
 
   @ManyToOne(

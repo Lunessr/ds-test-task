@@ -1,11 +1,12 @@
 import { UserResponseDto } from '../modules/user/dto/user-response.dto';
+import { IUser } from '../modules/user/interfaces/user';
 
-export const userMapper = (user): UserResponseDto => {
+export const userMapper = (user: IUser): UserResponseDto => {
   return {
     id: user.uaid,
-    full_name: user.full_name,
-    birth_date: new Date(user.birth_date).toLocaleDateString(),
+    fullName: user.full_name,
+    birthDate: new Date(user.birth_date).toLocaleDateString(),
     email: user.email,
-    activity_status: user.user_activity_status,
+    activityStatus: user.user_activity_status,
   };
 };

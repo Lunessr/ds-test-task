@@ -1,5 +1,4 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { Repository } from 'typeorm';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Validator } from 'jsonschema';
 import validator from 'validator';
 import {
@@ -10,20 +9,15 @@ import {
   USER_NOT_ACTIVE,
   USER_NOT_SUSPENDED,
 } from '../../constants/error-messages';
-import { PROCEDURES } from '../../constants/procedures';
-import { USER_REPOSITORY } from '../../constants/providers';
-import { User } from '../../entities/user.entity';
 import { userMapper } from '../../mappers/user.mapper';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UserActivityStatus } from '../../enums/user-activity-status';
+import { UserRepository } from './user.repository';
 
 @Injectable()
 export class UserService {
   private schemaValidator: Validator;
-  constructor(
-    @Inject(USER_REPOSITORY)
-    private userRepository: Repository<User>,
-  ) {
+  constructor(private userRepository: UserRepository) {
     this.schemaValidator = new Validator();
   }
 
@@ -31,8 +25,8 @@ export class UserService {
     const userCreatingSchema = {
       type: 'object',
       properties: {
-        full_name: { type: 'string', maxLength: 100 },
-        birth_date: { type: 'string', format: 'date' },
+        fullName: { type: 'string', maxLength: 100 },
+        birthDate: { type: 'string', format: 'date' },
         email: { type: 'string', format: 'email', maxLength: 200 },
       },
     };
@@ -60,10 +54,8 @@ export class UserService {
     for (let i = 0; i < 24; i++) {
       uaid += characters.charAt(Math.floor(Math.random() * charactersLength));
     }
-    const userWithUaid = await this.userRepository.query(
-      `${PROCEDURES.GET_USER_BY}('${uaid}')`,
-    );
-    if (!!userWithUaid[0][0]) {
+    const userWithUaid = await this.userRepository.getUserAccountBy(uaid);
+    if (!!userWithUaid) {
       await this.createRandomUaid();
     }
     return uaid;
@@ -71,123 +63,109 @@ export class UserService {
 
   public async addUserAccount(createUserDto: CreateUserDto) {
     this.validateUserCreatingData(createUserDto);
-    const { full_name, birth_date, email } = createUserDto;
-
-    const existUserAccount = await this.userRepository.query(
-      `${PROCEDURES.GET_USER_BY}('${email.toLowerCase()}')`,
+    const { fullName, birthDate, email } = createUserDto;
+    const existUserAccount = await this.userRepository.getUserAccountBy(
+      email.toLowerCase(),
     );
-    if (!!existUserAccount[0][0]) {
+    if (!!existUserAccount) {
       throw new BadRequestException(USER_EXIST);
     }
     const uaid = await this.createRandomUaid();
     const yearsRange =
-      new Date().getFullYear() - new Date(birth_date).getFullYear();
+      new Date().getFullYear() - new Date(birthDate).getFullYear();
     if (yearsRange < 18) {
       throw new BadRequestException(NOT_VALID_AGE);
     }
-    const status = await this.userRepository.query(
-      `${PROCEDURES.GET_USER_STATUS_CODE_BY_STATUS}('${UserActivityStatus.ACTIVE}')`,
+    const status = await this.userRepository.getActivityStatusCodeByStatus(
+      UserActivityStatus.ACTIVE,
     );
-    await this.userRepository.query(
-      `${
-        PROCEDURES.ADD_USER_ACCOUNT
-      }('${full_name}', '${birth_date}', '${email.toLowerCase()}', '${uaid}', ${
-        status[0][0].id
-      })`,
+    await this.userRepository.addUserAccount(
+      fullName,
+      birthDate,
+      email.toLowerCase(),
+      uaid,
+      status,
     );
-    const userAccount = await this.userRepository.query(
-      `${PROCEDURES.GET_USER_BY}('${uaid}')`,
-    );
-    return userMapper(userAccount[0][0]);
+    const userAccount = await this.userRepository.getUserAccountBy(uaid);
+    return userMapper(userAccount);
   }
 
   public async getAllUsers() {
-    const users = await this.userRepository.query(
-      `${PROCEDURES.GET_ALL_USERS}`,
-    );
-    if (!users[0][0]) {
+    const users = await this.userRepository.getAllUserAccounts();
+    if (!users[0]) {
       throw new BadRequestException(USERS_NOT_FOUND);
     }
-    return users[0].map(user => userMapper(user));
+    return users.map(user => userMapper(user));
   }
 
   public async updateUserAccount(uaid: string, email: string) {
-    this.validateUserUpdateData(email);
-    const existUserAccountWithUaid = await this.userRepository.query(
-      `${PROCEDURES.GET_USER_BY}('${uaid}')`,
+    this.validateUserUpdateData(email.toLowerCase());
+    const existUserAccountWithUaid = await this.userRepository.getUserAccountBy(
+      uaid,
     );
     if (
-      !existUserAccountWithUaid[0][0] ||
-      existUserAccountWithUaid[0][0].user_activity_status !==
+      !existUserAccountWithUaid ||
+      existUserAccountWithUaid.user_activity_status !==
         UserActivityStatus.ACTIVE
     ) {
       throw new BadRequestException(USER_NOT_ACTIVE);
     }
-    const existUserAccountWithEmail = await this.userRepository.query(
-      `${PROCEDURES.GET_USER_BY}('${email}')`,
-    );
-    if (!!existUserAccountWithEmail[0][0]) {
+    const existUserAccountWithEmail =
+      await this.userRepository.getUserAccountBy(email.toLowerCase());
+    if (!!existUserAccountWithEmail) {
       throw new BadRequestException(USER_EXIST);
     }
-    await this.userRepository.query(
-      `${PROCEDURES.UPDATE_USER_ACCOUNT}('${email}', '${uaid}')`,
-    );
+    await this.userRepository.updateUserAccount(email.toLowerCase(), uaid);
   }
 
   public async removeUserAccount(uaid: string) {
-    const existUserAccountWithUaid = await this.userRepository.query(
-      `${PROCEDURES.GET_USER_BY}('${uaid}')`,
+    const existUserAccountWithUaid = await this.userRepository.getUserAccountBy(
+      uaid,
     );
     if (
-      !existUserAccountWithUaid[0][0] ||
-      existUserAccountWithUaid[0][0].user_activity_status !==
+      !existUserAccountWithUaid ||
+      existUserAccountWithUaid.user_activity_status !==
         UserActivityStatus.ACTIVE
     ) {
       throw new BadRequestException(USER_NOT_ACTIVE);
     }
-    const status = await this.userRepository.query(
-      `${PROCEDURES.GET_USER_STATUS_CODE_BY_STATUS}('${UserActivityStatus.ARCHIVED}')`,
+    const status = await this.userRepository.getActivityStatusCodeByStatus(
+      UserActivityStatus.ARCHIVED,
     );
-    await this.userRepository.query(
-      `${PROCEDURES.REMOVE_USER_ACCOUNT}('${uaid}', ${status[0][0].id})`,
-    );
+    await this.userRepository.removeUserAccount(uaid, status);
   }
 
   public async suspendUserAccount(uaid: string) {
-    const existUserAccountWithUaid = await this.userRepository.query(
-      `${PROCEDURES.GET_USER_BY}('${uaid}')`,
+    const existUserAccountWithUaid = await this.userRepository.getUserAccountBy(
+      uaid,
     );
     if (
-      !existUserAccountWithUaid[0][0] ||
-      existUserAccountWithUaid[0][0].user_activity_status !==
+      !existUserAccountWithUaid ||
+      existUserAccountWithUaid.user_activity_status !==
         UserActivityStatus.ACTIVE
     ) {
       throw new BadRequestException(USER_NOT_ACTIVE);
     }
-    const status = await this.userRepository.query(
-      `${PROCEDURES.GET_USER_STATUS_CODE_BY_STATUS}('${UserActivityStatus.SUSPENDED}')`,
+    const status = await this.userRepository.getActivityStatusCodeByStatus(
+      UserActivityStatus.SUSPENDED,
     );
-    await this.userRepository.query(
-      `${PROCEDURES.SUSPEND_USER_ACCOUNT}('${uaid}', ${status[0][0].id})`,
-    );
+    await this.userRepository.suspendUserAccount(uaid, status);
   }
 
   public async reactivateUserAccount(uaid: string) {
-    const existUserAccountWithUaid = await this.userRepository.query(
-      `${PROCEDURES.GET_USER_BY}('${uaid}')`,
+    const existUserAccountWithUaid = await this.userRepository.getUserAccountBy(
+      uaid,
     );
     if (
-      !existUserAccountWithUaid[0][0] ||
-      existUserAccountWithUaid[0][0].user_activity_status !==
+      !existUserAccountWithUaid ||
+      existUserAccountWithUaid.user_activity_status !==
         UserActivityStatus.SUSPENDED
     ) {
       throw new BadRequestException(USER_NOT_SUSPENDED);
     }
-    const status = await this.userRepository.query(
-      `${PROCEDURES.GET_USER_STATUS_CODE_BY_STATUS}('${UserActivityStatus.ACTIVE}')`,
+    const status = await this.userRepository.getActivityStatusCodeByStatus(
+      UserActivityStatus.ACTIVE,
     );
-    await this.userRepository.query(
-      `${PROCEDURES.REACTIVATE_USER_ACCOUNT}('${uaid}', ${status[0][0].id})`,
-    );
+    await this.userRepository.reactivateUserAccount(uaid, status);
   }
 }
